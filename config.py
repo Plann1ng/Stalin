@@ -109,3 +109,40 @@ BACKTEST_END_DATE = None    # e.g., "2024-01-01"
 # In-sample / Out-of-sample split date
 IS_OOS_SPLIT_DATE = "2023-01-01"
 
+
+
+# Timeframe-specific bar-count overrides for Binance intraday files
+TIMEFRAME_VOLATILITY_LOOKBACK_4H_BARS = {
+    "5m": 25920,
+    "15m": 8640,
+    "30m": 4320,
+}
+
+# 4H baseline used for conservative bar-count scaling
+BARS_PER_4H = {
+    "5m": 48,
+    "15m": 16,
+    "30m": 8,
+    "4h": 1,
+}
+
+
+def get_timeframe_overrides(timeframe: str) -> dict:
+    """Return conservative timeframe-specific overrides for bar-count parameters."""
+    tf = (timeframe or "").lower()
+
+    if tf not in BARS_PER_4H:
+        return {}
+
+    overrides = {}
+
+    # Explicitly requested in task
+    if tf in TIMEFRAME_VOLATILITY_LOOKBACK_4H_BARS:
+        overrides['VOLATILITY_LOOKBACK_4H_BARS'] = TIMEFRAME_VOLATILITY_LOOKBACK_4H_BARS[tf]
+
+    # Other explicit bar-count assumptions calibrated around 4H comments
+    factor = BARS_PER_4H[tf]
+    overrides['MAX_TRADE_DURATION_BARS'] = MAX_TRADE_DURATION_BARS * factor
+    overrides['CIRCUIT_BREAKER_COOLDOWN_BARS'] = CIRCUIT_BREAKER_COOLDOWN_BARS * factor
+
+    return overrides
