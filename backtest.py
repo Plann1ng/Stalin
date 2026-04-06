@@ -211,6 +211,12 @@ def analyze_trades(trades: List[Trade], equity_curve: list,
     # In-sample / Out-of-sample split
     if IS_OOS_SPLIT_DATE:
         split_date = pd.to_datetime(IS_OOS_SPLIT_DATE)
+        entry_tz = getattr(trades_df['entry_time'].dt, 'tz', None)
+        if entry_tz is not None and split_date.tzinfo is None:
+            split_date = split_date.tz_localize(entry_tz)
+        elif entry_tz is None and split_date.tzinfo is not None:
+            split_date = split_date.tz_localize(None)
+
         is_trades = trades_df[trades_df['entry_time'] < split_date]
         oos_trades = trades_df[trades_df['entry_time'] >= split_date]
 
