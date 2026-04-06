@@ -12,18 +12,33 @@ from typing import List
 
 from config import (
     INITIAL_CAPITAL, RESULTS_DIR, IS_OOS_SPLIT_DATE,
-    RISK_PER_TRADE, FEE_ROUND_TRIP, SLIPPAGE_PER_SIDE
+    get_timeframe_overrides
 )
 from data_loader import load_csv
 from indicators import prepare_indicators
 from strategy import StalinStrategy, Trade
 
 
-def run_backtest(data_file: str = None, initial_capital: float = None) -> dict:
+def run_backtest(data_file: str = None, initial_capital: float = None, timeframe: str = None,
+                 save: bool = True, output_tag: str = None) -> dict:
     """
     Run full backtest and return results dictionary.
     """
     initial_capital = initial_capital or INITIAL_CAPITAL
+
+    # Apply conservative timeframe overrides for bar-count parameters
+    if timeframe:
+        overrides = get_timeframe_overrides(timeframe)
+        if overrides:
+            import indicators
+            import strategy
+            if "VOLATILITY_LOOKBACK_4H_BARS" in overrides:
+                indicators.VOLATILITY_LOOKBACK_4H_BARS = overrides["VOLATILITY_LOOKBACK_4H_BARS"]
+            if "MAX_TRADE_DURATION_BARS" in overrides:
+                strategy.MAX_TRADE_DURATION_BARS = overrides["MAX_TRADE_DURATION_BARS"]
+            if "CIRCUIT_BREAKER_COOLDOWN_BARS" in overrides:
+                strategy.CIRCUIT_BREAKER_COOLDOWN_BARS = overrides["CIRCUIT_BREAKER_COOLDOWN_BARS"]
+            print(f"Applying timeframe overrides for {timeframe}: {overrides}")
 
     # Load and prepare data
     print("=" * 70)
@@ -43,12 +58,14 @@ def run_backtest(data_file: str = None, initial_capital: float = None) -> dict:
 
     # Analyze results
     results = analyze_trades(trades, strategy.equity_curve, df, initial_capital)
+    results['bars'] = len(df)
 
     # Print report
     print_report(results)
 
     # Save results
-    save_results(results, trades, strategy.equity_curve)
+    if save:
+        save_results(results, trades, strategy.equity_curve, output_tag=output_tag)
 
     return results
 
@@ -194,6 +211,12 @@ def analyze_trades(trades: List[Trade], equity_curve: list,
     # In-sample / Out-of-sample split
     if IS_OOS_SPLIT_DATE:
         split_date = pd.to_datetime(IS_OOS_SPLIT_DATE)
+        entry_tz = getattr(trades_df['entry_time'].dt, 'tz', None)
+        if entry_tz is not None and split_date.tzinfo is None:
+            split_date = split_date.tz_localize(entry_tz)
+        elif entry_tz is None and split_date.tzinfo is not None:
+            split_date = split_date.tz_localize(None)
+
         is_trades = trades_df[trades_df['entry_time'] < split_date]
         oos_trades = trades_df[trades_df['entry_time'] >= split_date]
 
@@ -317,21 +340,22 @@ def print_report(results: dict):
     print("\n" + "=" * 70)
 
 
-def save_results(results: dict, trades: List[Trade], equity_curve: list):
+def save_results(results: dict, trades: List[Trade], equity_curve: list, output_tag: str = None):
     """Save results to files."""
     os.makedirs(RESULTS_DIR, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    suffix = f"_{output_tag}" if output_tag else ""
 
     # Save trades CSV
     if 'trades_df' in results:
-        trades_path = os.path.join(RESULTS_DIR, f"trades_{timestamp}.csv")
+        trades_path = os.path.join(RESULTS_DIR, f"trades_{timestamp}{suffix}.csv")
         results['trades_df'].to_csv(trades_path, index=False)
         print(f"\nTrades saved to: {trades_path}")
 
     # Save equity curve
     if equity_curve:
         eq_df = pd.DataFrame(equity_curve)
-        eq_path = os.path.join(RESULTS_DIR, f"equity_{timestamp}.csv")
+        eq_path = os.path.join(RESULTS_DIR, f"equity_{timestamp}{suffix}.csv")
         eq_df.to_csv(eq_path, index=False)
         print(f"Equity curve saved to: {eq_path}")
 
@@ -340,7 +364,7 @@ def save_results(results: dict, trades: List[Trade], equity_curve: list):
                if k != 'trades_df' and not isinstance(v, pd.DataFrame)}
     # Convert numpy types
     summary = _convert_numpy(summary)
-    summary_path = os.path.join(RESULTS_DIR, f"summary_{timestamp}.json")
+    summary_path = os.path.join(RESULTS_DIR, f"summary_{timestamp}{suffix}.json")
     with open(summary_path, 'w') as f:
         json.dump(summary, f, indent=2, default=str)
     print(f"Summary saved to: {summary_path}")
