@@ -146,6 +146,12 @@ def main():
 
     args = parser.parse_args()
 
+    # Backward-compatible convenience: if a directory is passed to --data,
+    # treat it as --data-dir to avoid IsADirectoryError.
+    if args.data and os.path.isdir(args.data) and not args.data_dir:
+        args.data_dir = args.data
+        args.data = None
+
     # Fetch data if requested
     if args.fetch:
         from data_loader import fetch_from_exchange
